@@ -18,6 +18,9 @@ public:
     WeaponType weaponType() const { return m_weaponType; }
     int id() const { return m_id; }
     void setId(int id) { m_id = id; }
+    int persistentId() const { return m_persistentId; }
+    void setPersistentId(int pid) { m_persistentId = pid; }
+    static int nextPersistentId();
     TeamSide side() const { return m_side; }
     void setSide(TeamSide s) { m_side = s; }
 
@@ -59,6 +62,7 @@ public:
     Weapon weapon() const { return m_weapon; }
     void setWeapon(const Weapon &w);
     bool hasWeapon() const { return m_hasWeapon; }
+    void clearWeapon();
 
     const std::array<Artifact, MAX_ARTIFACT_SLOTS> &artifacts() const { return m_artifacts; }
     Artifact artifact(ArtifactSlot slot) const;
@@ -171,6 +175,7 @@ protected:
     GridPos m_gridPos;
     int m_deployIndex = -1;
     int m_id = -1;
+    int m_persistentId = -1;
     TeamSide m_side = TeamSide::Player;
 };
 

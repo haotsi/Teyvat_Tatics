@@ -2,6 +2,13 @@
 #include <QtMath>
 #include <QRandomGenerator>
 
+static int s_nextPersistentId = 1;
+
+int CharacterBase::nextPersistentId()
+{
+    return s_nextPersistentId++;
+}
+
 CharacterBase::CharacterBase(const QString &name, ElementType element, WeaponType weaponType)
     : m_name(name), m_element(element), m_weaponType(weaponType)
 {
@@ -9,12 +16,18 @@ CharacterBase::CharacterBase(const QString &name, ElementType element, WeaponTyp
     m_weapon = Weapon(m_weaponType, 2);
     m_hasWeapon = true;
     m_currentHp = maxHp();
+    m_persistentId = nextPersistentId();
 }
 
 void CharacterBase::setWeapon(const Weapon &w)
 {
     m_weapon = w;
     m_hasWeapon = true;
+}
+
+void CharacterBase::clearWeapon()
+{
+    m_hasWeapon = false;
 }
 
 Artifact CharacterBase::artifact(ArtifactSlot slot) const
@@ -53,7 +66,8 @@ double CharacterBase::baseEnergyRcVal() const { return m_baseEnergyRcVal * const
 
 double CharacterBase::atk() const
 {
-    return (baseAtk() + m_weapon.atk()) * (1.0 + artifactAtkPer()) + artifactAtkNum();
+    double weaponAtk = m_hasWeapon ? m_weapon.atk() : 0;
+    return (baseAtk() + weaponAtk) * (1.0 + artifactAtkPer()) + artifactAtkNum();
 }
 
 double CharacterBase::hp() const

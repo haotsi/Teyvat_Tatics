@@ -27,7 +27,12 @@ void AIController::deployTeam(Board *board, QVector<CharacterBase*> &team)
 
 GridPos AIController::chooseMove(Board *board, CharacterBase *piece)
 {
-    if (!board || !piece) return piece->gridPos();
+    if (!board || !piece) return GridPos{};
+
+    // If piece can already attack a target, stay in place
+    auto currentTargets = board->getValidAttackTargets(piece);
+    if (!currentTargets.isEmpty())
+        return piece->gridPos();
 
     auto validMoves = board->getValidMoves(piece);
     if (validMoves.isEmpty()) return piece->gridPos();
@@ -35,9 +40,33 @@ GridPos AIController::chooseMove(Board *board, CharacterBase *piece)
     GridPos best = findBestPosition(board, piece);
     if (best != piece->gridPos()) return best;
 
-    // Random valid move as fallback
-    auto *rng = QRandomGenerator::global();
-    return validMoves[rng->bounded(validMoves.size())];
+    // No position gives attack targets: move toward nearest enemy
+    auto enemies = board->enemyPieces();
+    if (!enemies.isEmpty()) {
+        GridPos current = piece->gridPos();
+        // Find nearest enemy
+        int minDist = 999;
+        for (auto *enemy : enemies) {
+            int d = current.manhattanDist(enemy->gridPos());
+            if (d < minDist) minDist = d;
+        }
+        // Find move that reduces distance to nearest enemy
+        GridPos bestMove = current;
+        int bestDist = minDist;
+        for (auto &move : validMoves) {
+            for (auto *enemy : enemies) {
+                int d = move.manhattanDist(enemy->gridPos());
+                if (d < bestDist) {
+                    bestDist = d;
+                    bestMove = move;
+                }
+            }
+        }
+        if (bestMove != current) return bestMove;
+    }
+
+    // Stay in place rather than moving randomly
+    return piece->gridPos();
 }
 
 CharacterBase* AIController::chooseTarget(Board *board, CharacterBase *piece)
@@ -71,9 +100,13 @@ double AIController::scoreTarget(CharacterBase *attacker, CharacterBase *target)
 
     double score = 0;
 
-    // Prioritize low HP targets
+    // Prioritize low HP targets (execution bonus)
     double hpRatio = target->currentHp() / target->maxHp();
     score += (1.0 - hpRatio) * 50;
+
+    // Execution bonus: low HP targets are high priority
+    if (hpRatio < 0.3)
+        score += 30;
 
     // Prioritize high ATK targets (threat assessment)
     score += target->atk() / 100.0;
@@ -82,9 +115,9 @@ double AIController::scoreTarget(CharacterBase *attacker, CharacterBase *target)
     if (target->shieldStrength() > 0)
         score *= 0.5;
 
-    // Avoid triggering bad reactions for us
+    // Avoid triggering bad reactions for us (reduced penalty)
     if (shouldAvoidReaction(attacker, target, attacker->element()))
-        score *= 0.5;
+        score *= 0.8;
 
     // Prefer targets that give favorable element reactions
     if (target->hasAura(ElementType::Hydro) && attacker->element() == ElementType::Pyro)
@@ -137,10 +170,17 @@ GridPos AIController::findBestPosition(Board *board, CharacterBase *piece) const
 
     if (validMoves.isEmpty()) return current;
 
-    GridPos best = current;
-    int bestTargetsReachable = 0;
+    // Check if current position already has targets
+    int currentTargets = board->getValidAttackTargets(piece).size();
+    if (currentTargets >= 1)
+        return current;
 
-    // Save original position, try each move
+    GridPos best = current;
+    int bestTargetsReachable = currentTargets;
+
+    // Block board signals during temporary evaluation moves
+    board->setSignalBlocked(true);
+
     GridPos original = current;
     for (auto &move : validMoves) {
         board->removePiece(original);
@@ -157,6 +197,8 @@ GridPos AIController::findBestPosition(Board *board, CharacterBase *piece) const
         board->placePiece(original, piece);
         piece->setGridPos(original);
     }
+
+    board->setSignalBlocked(false);
 
     return best;
 }

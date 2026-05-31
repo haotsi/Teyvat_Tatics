@@ -314,6 +314,7 @@ void GameEngine::processCharacterAction(CharacterBase *piece)
 
     BattleAction action;
     action.attackerId = piece->id();
+    action.attackerSide = piece->side();
 
     // Tick burning damage
     if (piece->burningTurns() > 0) {
@@ -419,6 +420,7 @@ void GameEngine::processAttack(CharacterBase *attacker, CharacterBase *defender,
     logEntry.crit = QRandomGenerator::global()->bounded(100) / 100.0 < attacker->critRate();
     logEntry.attackElement = atkElem;
     logEntry.reactionElement = reactionElementColor(reaction.type);
+    logEntry.attackerSide = attacker->side();
     m_battleLog.append(logEntry);
     emit battleActionOccurred(logEntry);
 }
@@ -666,9 +668,13 @@ bool GameEngine::buyShopItem(int index)
             break;
         case ShopItem::Item_Weapon:
             m_weaponBackpack.append(purchasedWeapon);
+            enforceBackpackCapacity();
+            emit backpackChanged();
             break;
         case ShopItem::Item_Artifact:
             m_artifactBackpack.append(purchasedArtifact);
+            enforceBackpackCapacity();
+            emit backpackChanged();
             break;
     }
 
@@ -680,8 +686,8 @@ bool GameEngine::sellStorageItem(int index)
 {
     if (index < 0 || index >= m_storage.size()) return false;
     auto *piece = m_storage[index];
-    // Sell for 1/4 of character cost
-    m_primogems += qMax(1, static_cast<int>(CHARACTER_COST * SELL_RATIO));
+    // Sell price: 90 base + 15 per constellation
+    m_primogems += 90 + piece->constellation() * 15;
     // Also sell equipped items
     if (piece->hasWeapon()) {
         m_mora += piece->weapon().sellPrice();
@@ -691,6 +697,7 @@ bool GameEngine::sellStorageItem(int index)
         if (piece->hasArtifact(slot))
             m_mora += piece->artifact(slot).sellPrice();
     }
+    unregisterCharacter(piece);
     delete piece;
     m_storage.removeAt(index);
     emit resourcesChanged();
@@ -704,6 +711,7 @@ bool GameEngine::sellWeaponFromBackpack(int index)
     m_mora += m_weaponBackpack[index].sellPrice();
     m_weaponBackpack.removeAt(index);
     emit resourcesChanged();
+    emit backpackChanged();
     return true;
 }
 
@@ -713,6 +721,7 @@ bool GameEngine::sellArtifactFromBackpack(int index)
     m_mora += m_artifactBackpack[index].sellPrice();
     m_artifactBackpack.removeAt(index);
     emit resourcesChanged();
+    emit backpackChanged();
     return true;
 }
 
@@ -721,6 +730,7 @@ bool GameEngine::addToStorage(CharacterBase *piece)
     if (m_storage.size() >= STORAGE_CAPACITY) return false;
     piece->setSide(TeamSide::Player);
     m_storage.append(piece);
+    registerCharacter(piece);
     emit storageChanged();
     return true;
 }
@@ -795,6 +805,8 @@ bool GameEngine::equipWeapon(CharacterBase *piece, int backpackIndex)
     if (piece->hasWeapon())
         m_weaponBackpack.append(piece->weapon());
     piece->setWeapon(w);
+    enforceBackpackCapacity();
+    emit backpackChanged();
     return true;
 }
 
@@ -805,6 +817,8 @@ bool GameEngine::equipArtifact(CharacterBase *piece, int backpackIndex, Artifact
     if (piece->hasArtifact(slot))
         m_artifactBackpack.append(piece->artifact(slot));
     piece->setArtifact(slot, a);
+    enforceBackpackCapacity();
+    emit backpackChanged();
     return true;
 }
 
@@ -812,8 +826,9 @@ bool GameEngine::unequipWeapon(CharacterBase *piece)
 {
     if (!piece || !piece->hasWeapon()) return false;
     m_weaponBackpack.append(piece->weapon());
-    // Give default weapon
-    piece->setWeapon(Weapon(piece->weaponType(), 2));
+    piece->clearWeapon();
+    enforceBackpackCapacity();
+    emit backpackChanged();
     return true;
 }
 
@@ -822,6 +837,8 @@ bool GameEngine::unequipArtifact(CharacterBase *piece, ArtifactSlot slot)
     if (!piece || !piece->hasArtifact(slot)) return false;
     m_artifactBackpack.append(piece->artifact(slot));
     piece->clearArtifact(slot);
+    enforceBackpackCapacity();
+    emit backpackChanged();
     return true;
 }
 
@@ -945,4 +962,82 @@ QVector<QPair<CharacterBase*, CharacterBase*>> GameEngine::findDuplicates() cons
         }
     }
     return result;
+}
+
+void GameEngine::registerCharacter(CharacterBase *p)
+{
+    if (!p) return;
+    m_characterRegistry.insert(p->persistentId(), p);
+}
+
+void GameEngine::unregisterCharacter(CharacterBase *p)
+{
+    if (!p) return;
+    m_characterRegistry.remove(p->persistentId());
+}
+
+CharacterBase* GameEngine::findCharacterById(int persistentId) const
+{
+    return m_characterRegistry.value(persistentId, nullptr);
+}
+
+void GameEngine::enforceBackpackCapacity()
+{
+    // Enforce weapon backpack capacity
+    while (m_weaponBackpack.size() > MAX_WEAPON_BACKPACK) {
+        // Find item with lowest sellPrice; if tie, earliest (lowest index)
+        int worstIdx = 0;
+        int worstPrice = m_weaponBackpack[0].sellPrice();
+        for (int i = 1; i < m_weaponBackpack.size(); ++i) {
+            int p = m_weaponBackpack[i].sellPrice();
+            if (p < worstPrice) {
+                worstPrice = p;
+                worstIdx = i;
+            }
+        }
+        m_mora += m_weaponBackpack[worstIdx].sellPrice();
+        emit messageLogged(QStringLiteral("已自动出售 %1，获得 %2 摩拉")
+                          .arg(m_weaponBackpack[worstIdx].name())
+                          .arg(m_weaponBackpack[worstIdx].sellPrice()));
+        m_weaponBackpack.removeAt(worstIdx);
+    }
+
+    // Enforce artifact backpack capacity
+    while (m_artifactBackpack.size() > MAX_ARTIFACT_BACKPACK) {
+        int worstIdx = 0;
+        int worstPrice = m_artifactBackpack[0].sellPrice();
+        for (int i = 1; i < m_artifactBackpack.size(); ++i) {
+            int p = m_artifactBackpack[i].sellPrice();
+            if (p < worstPrice) {
+                worstPrice = p;
+                worstIdx = i;
+            }
+        }
+        m_mora += m_artifactBackpack[worstIdx].sellPrice();
+        emit messageLogged(QStringLiteral("已自动出售 %1，获得 %2 摩拉")
+                          .arg(m_artifactBackpack[worstIdx].name())
+                          .arg(m_artifactBackpack[worstIdx].sellPrice()));
+        m_artifactBackpack.removeAt(worstIdx);
+    }
+    emit resourcesChanged();
+}
+
+CharacterBase* GameEngine::createMergedCharacter(CharacterBase *a, CharacterBase *b)
+{
+    if (!a || !b || a->name() != b->name()) return nullptr;
+
+    int newConst = a->constellation() + b->constellation() + 1;
+    newConst = qMin(newConst, 6);
+
+    auto merged = a->clone();
+    merged->setConstellation(newConst);
+
+    // Clear all equipment (new character starts empty)
+    merged->clearWeapon();
+    for (int i = 0; i < MAX_ARTIFACT_SLOTS; ++i) {
+        auto slot = static_cast<ArtifactSlot>(i);
+        merged->clearArtifact(slot);
+    }
+
+    return merged.release();
 }

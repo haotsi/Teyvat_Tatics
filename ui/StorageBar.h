@@ -29,6 +29,7 @@ signals:
 protected:
     void mousePressEvent(QMouseEvent *event) override;
     void mouseMoveEvent(QMouseEvent *event) override;
+    void mouseReleaseEvent(QMouseEvent *event) override;
     void paintEvent(QPaintEvent *event) override;
     void enterEvent(QEnterEvent *event) override;
     void leaveEvent(QEvent *event) override;
@@ -39,6 +40,7 @@ private:
     QPoint m_dragStartPos;
     bool m_hovered = false;
     bool m_mergeHighlight = false;
+    bool m_dragging = false;
 };
 
 class StorageBar : public QWidget {

@@ -152,6 +152,27 @@ QWidget* ShopWidget::createItemCard(int index)
     });
     layout->addWidget(buyBtn);
 
+    // Lock button
+    auto *lockBtn = new QPushButton(item->locked ? QStringLiteral("🔒") : QStringLiteral("🔓"));
+    lockBtn->setFixedSize(28, 24);
+    lockBtn->setStyleSheet(
+        "QPushButton { background: transparent; color: #aaa; border: 1px solid #555; "
+        "border-radius: 2px; font-size: 11px; }"
+        "QPushButton:hover { background: #3a3a5c; }"
+    );
+    if (item->locked) {
+        lockBtn->setStyleSheet(
+            "QPushButton { background: #3a3a20; color: #ffd700; border: 1px solid #ffd700; "
+            "border-radius: 2px; font-size: 11px; }"
+            "QPushButton:hover { background: #5a5a30; }"
+        );
+    }
+    connect(lockBtn, &QPushButton::clicked, this, [this, index]() {
+        m_engine->shop()->toggleLock(index);
+        refresh();
+    });
+    layout->addWidget(lockBtn);
+
     if (item->locked) {
         card->setStyleSheet(card->styleSheet() + " border: 1px solid #ffd700;");
     }

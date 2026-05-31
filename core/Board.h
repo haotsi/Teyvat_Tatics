@@ -54,11 +54,16 @@ public:
     // Get adjacent positions (8-direction)
     QVector<GridPos> adjacentPositions8(GridPos pos) const;
 
+    // Signal blocking for AI evaluation (prevents boardChanged flooding)
+    void setSignalBlocked(bool blocked) { m_signalBlocked = blocked; }
+    bool isSignalBlocked() const { return m_signalBlocked; }
+
 signals:
     void boardChanged();
 
 private:
     CharacterBase* m_grid[BOARD_ROWS][BOARD_COLS] = {};
+    bool m_signalBlocked = false;
 };
 
 #endif // BOARD_H

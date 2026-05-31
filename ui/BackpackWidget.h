@@ -64,6 +64,10 @@ public:
 signals:
     void weaponClicked(const Weapon &weapon, int backpackIndex);
     void artifactClicked(const Artifact &artifact, int backpackIndex);
+    void closeRequested();
+
+protected:
+    void showEvent(QShowEvent *event) override;
 
 private:
     GameEngine *m_engine;

@@ -9,9 +9,14 @@
 #include <QVector>
 #include <QTimer>
 #include <QMap>
+#include <QHash>
 #include <QPair>
 #include <memory>
 #include <vector>
+
+// Backpack capacity limits
+constexpr int MAX_WEAPON_BACKPACK = 20;
+constexpr int MAX_ARTIFACT_BACKPACK = 20;
 
 class Board;
 class Team;
@@ -115,7 +120,16 @@ public:
     // Constellation / merge
     bool mergeCharacters(int storageIndexA, int storageIndexB);
     CharacterBase* mergeCharactersDirect(CharacterBase *a, CharacterBase *b);
+    CharacterBase* createMergedCharacter(CharacterBase *a, CharacterBase *b);
     QVector<QPair<CharacterBase*, CharacterBase*>> findDuplicates() const;
+
+    // Character registry for safe ID-based lookup
+    void registerCharacter(CharacterBase *p);
+    void unregisterCharacter(CharacterBase *p);
+    CharacterBase* findCharacterById(int persistentId) const;
+
+    // Backpack capacity enforcement
+    void enforceBackpackCapacity();
 
     // Interest
     void calculateInterest();
@@ -143,6 +157,7 @@ signals:
     void battleFinished(bool playerWin);
     void gameOver(bool playerWin);
     void messageLogged(const QString &message);
+    void backpackChanged();
 
 private:
     Board *m_board;
@@ -166,6 +181,7 @@ private:
     QVector<CharacterBase*> m_storage; // owned characters not on board
     QVector<Weapon> m_weaponBackpack;
     QVector<Artifact> m_artifactBackpack;
+    QHash<int, CharacterBase*> m_characterRegistry; // persistentId -> character lookup
 
     QVector<BattleAction> m_battleLog;
 

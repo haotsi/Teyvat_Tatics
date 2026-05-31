@@ -1,2 +1,41 @@
-/design.md
-/problem
+
+# 构建目录
+build/
+
+# Qt Creator 配置
+.qtcreator/
+.qtc_clangd/
+.qtc/
+
+# 编译生成的文件
+*.exe
+*.ilk
+*.pdb
+*.obj
+*.o
+*.so
+*.dll
+*.a
+*.lib
+
+# CMake 生成文件
+CMakeCache.txt
+CMakeFiles/
+cmake_install.cmake
+Makefile
+*.ninja
+.ninja_deps
+.ninja_log
+compile_commands.json
+
+# Qt 自动生成文件
+moc_*.cpp
+moc_*.h
+qrc_*.cpp
+ui_*.h
+*_autogen/
+
+# 其他临时文件
+*.swp
+*.swo
+*~

@@ -101,6 +101,7 @@ void StorageSlotWidget::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton) {
         m_dragStartPos = event->pos();
+        m_dragging = false;
         setCursor(QCursor(Qt::ClosedHandCursor));
     }
 }
@@ -110,6 +111,7 @@ void StorageSlotWidget::mouseMoveEvent(QMouseEvent *event)
     if (!m_character) return;
     if ((event->pos() - m_dragStartPos).manhattanLength() < 10) return;
 
+    m_dragging = true;
     emit dragStarted(m_index);
 
     auto *mimeData = new DragDropMimeData();
@@ -135,6 +137,16 @@ void StorageSlotWidget::mouseMoveEvent(QMouseEvent *event)
     drag->setHotSpot(QPoint(18, 18));
     drag->exec(Qt::MoveAction);
 
+    setCursor(QCursor(Qt::OpenHandCursor));
+}
+
+void StorageSlotWidget::mouseReleaseEvent(QMouseEvent *event)
+{
+    Q_UNUSED(event);
+    if (!m_dragging && m_character) {
+        emit clicked(m_index);
+    }
+    m_dragging = false;
     setCursor(QCursor(Qt::OpenHandCursor));
 }
 

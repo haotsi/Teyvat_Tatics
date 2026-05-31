@@ -3,6 +3,7 @@
 #include <QPainter>
 #include <QMouseEvent>
 #include <QContextMenuEvent>
+#include <QShowEvent>
 #include <QMenu>
 #include <QCursor>
 #include <QDrag>
@@ -197,8 +198,6 @@ BackpackWidget::BackpackWidget(GameEngine *engine, QWidget *parent)
     : QWidget(parent), m_engine(engine)
 {
     buildUI();
-    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
-    setAttribute(Qt::WA_ShowWithoutActivating);
 }
 
 void BackpackWidget::buildUI()
@@ -207,9 +206,22 @@ void BackpackWidget::buildUI()
     m_mainLayout->setContentsMargins(6, 6, 6, 6);
     m_mainLayout->setSpacing(4);
 
+    // Title bar with close button
+    auto *titleBar = new QHBoxLayout;
     m_titleLabel = new QLabel(QStringLiteral("背包 (武器/圣遗物)"));
     m_titleLabel->setStyleSheet("color: #ffd700; font-size: 12px; font-weight: bold;");
-    m_mainLayout->addWidget(m_titleLabel);
+    titleBar->addWidget(m_titleLabel);
+    titleBar->addStretch();
+    auto *closeBtn = new QPushButton(QStringLiteral("× 关闭"));
+    closeBtn->setFixedSize(56, 22);
+    closeBtn->setStyleSheet(
+        "QPushButton { background: #5a2020; color: #faa; border: 1px solid #844; "
+        "border-radius: 2px; font-size: 10px; }"
+        "QPushButton:hover { background: #7a3030; }"
+    );
+    connect(closeBtn, &QPushButton::clicked, this, &BackpackWidget::closeRequested);
+    titleBar->addWidget(closeBtn);
+    m_mainLayout->addLayout(titleBar);
 
     // Grid of slots: 5x2
     for (int row = 0; row < 2; ++row) {
@@ -259,4 +271,10 @@ void BackpackWidget::refresh()
     // Clear remaining
     for (; slotIdx < BACKPACK_CAPACITY; ++slotIdx)
         m_slots[slotIdx]->clear();
+}
+
+void BackpackWidget::showEvent(QShowEvent *event)
+{
+    QWidget::showEvent(event);
+    refresh();
 }

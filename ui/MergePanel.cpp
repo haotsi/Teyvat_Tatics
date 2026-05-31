@@ -1,5 +1,6 @@
 #include "MergePanel.h"
 #include "core/GameEngine.h"
+#include "core/Board.h"
 #include "core/CharacterBase.h"
 #include "ui/DragDropMimeData.h"
 #include <QPainter>
@@ -30,7 +31,14 @@ void MergeSlotWidget::setCharacter(CharacterBase *piece)
 
 void MergeSlotWidget::clear()
 {
+    // Remove reference if we had a character
+    if (m_character && m_panel) {
+        m_panel->removeReference(m_character);
+    }
     m_character = nullptr;
+    m_sourceType.clear();
+    m_sourceIndex = -1;
+    m_sourcePos = {-1, -1};
     m_highlighted = false;
     update();
 }
@@ -38,7 +46,14 @@ void MergeSlotWidget::clear()
 CharacterBase* MergeSlotWidget::takeCharacter()
 {
     auto *c = m_character;
+    // Remove reference tracking
+    if (c && m_panel) {
+        m_panel->removeReference(c);
+    }
     m_character = nullptr;
+    m_sourceType.clear();
+    m_sourceIndex = -1;
+    m_sourcePos = {-1, -1};
     update();
     return c;
 }
@@ -109,20 +124,55 @@ void MergeSlotWidget::dropEvent(QDropEvent *event)
 {
     if (!m_acceptDrops) return;
     auto *mime = DragDropMimeData::fromMimeData(event->mimeData());
-    if (!mime) return;
+    if (!mime || !m_engine || !m_panel) return;
 
-    // The actual character retrieval is handled externally via signals
-    // For now, accept the drop and let MergePanel handle it
+    QString sourceType = mime->sourceType();
+    CharacterBase *droppedChar = nullptr;
+
+    if (sourceType == QStringLiteral("storage")) {
+        int idx = mime->sourceIndex();
+        auto &storage = m_engine->storage();
+        if (idx >= 0 && idx < storage.size()) {
+            droppedChar = storage[idx];
+        }
+    } else if (sourceType == QStringLiteral("board")) {
+        GridPos pos{mime->gridRow(), mime->gridCol()};
+        if (pos.isValid()) {
+            droppedChar = m_engine->board()->pieceAt(pos);
+        }
+    }
+
+    if (!droppedChar) return;
+
+    // Check if this character is already referenced in another slot
+    if (m_panel->isReferenced(droppedChar)) {
+        event->ignore();
+        return;
+    }
+
+    // Clear previous content (remove old reference)
+    if (m_character) {
+        clear();
+    }
+
+    // Record reference only (don't delete from source)
+    m_character = droppedChar;
+    m_sourceType = sourceType;
+    m_sourceIndex = mime->sourceIndex();
+    m_sourcePos = GridPos{mime->gridRow(), mime->gridCol()};
+    m_panel->addReference(droppedChar);
+
     event->acceptProposedAction();
-    // MergePanel will process through external mechanisms
+    update();
+    emit characterDropped();
 }
 
 void MergeSlotWidget::mousePressEvent(QMouseEvent *event)
 {
     if (event->button() == Qt::RightButton && m_character) {
-        // Right-click to remove
-        m_character = nullptr;
-        update();
+        // Right-click to remove (clear reference, don't delete)
+        clear();
+        emit characterDropped();
         return;
     }
     QFrame::mousePressEvent(event);
@@ -137,9 +187,22 @@ MergePanel::MergePanel(GameEngine *engine, QWidget *parent)
     mainLayout->setContentsMargins(8, 8, 8, 8);
     mainLayout->setSpacing(6);
 
+    // Title bar with close button
+    auto *titleBar = new QHBoxLayout;
     auto *titleLabel = new QLabel(QStringLiteral("命之座合成"));
     titleLabel->setStyleSheet("color: #ffd700; font-size: 14px; font-weight: bold;");
-    mainLayout->addWidget(titleLabel);
+    titleBar->addWidget(titleLabel);
+    titleBar->addStretch();
+    auto *closeBtn = new QPushButton(QStringLiteral("× 关闭"));
+    closeBtn->setFixedSize(56, 22);
+    closeBtn->setStyleSheet(
+        "QPushButton { background: #5a2020; color: #faa; border: 1px solid #844; "
+        "border-radius: 2px; font-size: 10px; }"
+        "QPushButton:hover { background: #7a3030; }"
+    );
+    connect(closeBtn, &QPushButton::clicked, this, &MergePanel::closeRequested);
+    titleBar->addWidget(closeBtn);
+    mainLayout->addLayout(titleBar);
 
     auto *slotsLayout = new QHBoxLayout;
     slotsLayout->setSpacing(8);
@@ -151,6 +214,8 @@ MergePanel::MergePanel(GameEngine *engine, QWidget *parent)
     labelA->setAlignment(Qt::AlignCenter);
     slotALayout->addWidget(labelA);
     m_slotA = new MergeSlotWidget(true);
+    m_slotA->setEngine(m_engine);
+    m_slotA->setPanel(this);
     slotALayout->addWidget(m_slotA);
     slotsLayout->addLayout(slotALayout);
 
@@ -167,6 +232,8 @@ MergePanel::MergePanel(GameEngine *engine, QWidget *parent)
     labelB->setAlignment(Qt::AlignCenter);
     slotBLayout->addWidget(labelB);
     m_slotB = new MergeSlotWidget(true);
+    m_slotB->setEngine(m_engine);
+    m_slotB->setPanel(this);
     slotBLayout->addWidget(m_slotB);
     slotsLayout->addLayout(slotBLayout);
 
@@ -183,6 +250,8 @@ MergePanel::MergePanel(GameEngine *engine, QWidget *parent)
     labelR->setAlignment(Qt::AlignCenter);
     slotRLayout->addWidget(labelR);
     m_slotResult = new MergeSlotWidget(false);
+    m_slotResult->setEngine(m_engine);
+    m_slotResult->setPanel(this);
     slotRLayout->addWidget(m_slotResult);
     slotsLayout->addLayout(slotRLayout);
 
@@ -205,10 +274,12 @@ MergePanel::MergePanel(GameEngine *engine, QWidget *parent)
     m_statusLabel->setAlignment(Qt::AlignCenter);
     mainLayout->addWidget(m_statusLabel);
 
+    // Connect slot drop signals
+    connect(m_slotA, &MergeSlotWidget::characterDropped, this, &MergePanel::updateMergeState);
+    connect(m_slotB, &MergeSlotWidget::characterDropped, this, &MergePanel::updateMergeState);
+
     setStyleSheet("background: #1a1a2e; border: 1px solid #555; border-radius: 6px;");
-    setFixedSize(460, 260);
-    setWindowFlags(Qt::Tool | Qt::FramelessWindowHint);
-    setAttribute(Qt::WA_ShowWithoutActivating);
+    setFixedSize(460, 280);
 }
 
 void MergePanel::refresh()
@@ -216,6 +287,7 @@ void MergePanel::refresh()
     m_slotA->clear();
     m_slotB->clear();
     m_slotResult->clear();
+    clearAllReferences();
     m_mergeBtn->setEnabled(false);
     m_statusLabel->setText(QStringLiteral("将两个同名角色拖入上方格子"));
     updateMergeState();
@@ -256,20 +328,89 @@ void MergePanel::updateMergeState()
 
 void MergePanel::performMerge()
 {
-    auto *a = m_slotA->takeCharacter();
-    auto *b = m_slotB->takeCharacter();
+    auto *a = m_slotA->character();
+    auto *b = m_slotB->character();
     if (!a || !b) return;
 
-    auto *result = m_engine->mergeCharactersDirect(a, b);
-    if (!result) {
-        // Put back characters
-        m_slotA->setCharacter(a);
-        m_slotB->setCharacter(b);
+    // Verify same name
+    if (a->name() != b->name()) {
+        m_statusLabel->setText(QStringLiteral("角色名称不同，无法合成"));
         return;
     }
 
+    // Check storage capacity (need 1 free slot for result)
+    if (m_engine->storage().size() >= STORAGE_CAPACITY) {
+        m_statusLabel->setText(QStringLiteral("储存栏已满，无法合成！"));
+        return;
+    }
+
+    // Step 1: Unequip all equipment from both characters
+    for (auto *piece : {a, b}) {
+        if (piece->hasWeapon())
+            m_engine->unequipWeapon(piece);
+        for (int i = 0; i < MAX_ARTIFACT_SLOTS; ++i) {
+            auto slot = static_cast<ArtifactSlot>(i);
+            if (piece->hasArtifact(slot))
+                m_engine->unequipArtifact(piece, slot);
+        }
+    }
+
+    // Step 2: Remove from source positions (safe index order for storage)
+    QString typeA = m_slotA->sourceType();
+    QString typeB = m_slotB->sourceType();
+    int idxA = m_slotA->sourceIndex();
+    int idxB = m_slotB->sourceIndex();
+
+    // For storage: remove higher index first to avoid shifting the lower index
+    if (typeA == QStringLiteral("storage") && typeB == QStringLiteral("storage")) {
+        if (idxA > idxB) {
+            m_engine->takeFromStorage(idxA);
+            m_engine->takeFromStorage(idxB);
+        } else {
+            m_engine->takeFromStorage(idxB);
+            m_engine->takeFromStorage(idxA);
+        }
+    } else {
+        // Mixed or board-only sources: order doesn't matter
+        if (typeA == QStringLiteral("storage")) {
+            m_engine->takeFromStorage(idxA);
+        } else if (typeA == QStringLiteral("board")) {
+            m_engine->board()->removePiece(m_slotA->sourcePos());
+        }
+        if (typeB == QStringLiteral("storage")) {
+            m_engine->takeFromStorage(idxB);
+        } else if (typeB == QStringLiteral("board")) {
+            m_engine->board()->removePiece(m_slotB->sourcePos());
+        }
+    }
+
+    // Step 3: Create new merged character (empty equipment) BEFORE deleting originals
+    auto *result = m_engine->createMergedCharacter(a, b);
+    if (!result) {
+        m_statusLabel->setText(QStringLiteral("合成失败！"));
+        return;
+    }
+
+    // Step 4: Unregister and delete old characters
+    m_engine->unregisterCharacter(a);
+    m_engine->unregisterCharacter(b);
+    delete a;
+    delete b;
+
+    // Step 5: Add result to storage
+    if (!m_engine->addToStorage(result)) {
+        m_engine->unregisterCharacter(result);
+        delete result;
+        m_statusLabel->setText(QStringLiteral("储存栏已满，合成取消！"));
+        return;
+    }
+
+    // Clear references and slots
+    clearAllReferences();
+    m_slotA->clear();
+    m_slotB->clear();
     m_slotResult->setCharacter(result);
     m_mergeBtn->setEnabled(false);
-    m_statusLabel->setText(QStringLiteral("合成完成！结果可在结果槽中查看"));
+    m_statusLabel->setText(QStringLiteral("合成完成！结果已加入储存栏"));
     emit mergeCompleted(result);
 }

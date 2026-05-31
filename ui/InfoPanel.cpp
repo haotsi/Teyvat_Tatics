@@ -3,8 +3,13 @@
 #include "core/Board.h"
 #include "core/CharacterBase.h"
 #include "core/Team.h"
+#include "ui/DragDropMimeData.h"
 #include <QScrollArea>
 #include <QFrame>
+#include <QDragEnterEvent>
+#include <QDropEvent>
+#include <QTimer>
+#include <functional>
 
 InfoPanel::InfoPanel(GameEngine *engine, QWidget *parent)
     : QWidget(parent), m_engine(engine)
@@ -192,7 +197,68 @@ void InfoPanel::refreshResources()
     }
 }
 
-void InfoPanel::showCharacterInfo(CharacterBase *piece)
+// Helper class for drag-drop equipment rows
+class EquipDropRow : public QFrame {
+public:
+    EquipDropRow(bool isWeapon, ArtifactSlot artSlot, int pieceId,
+                 GameEngine *engine, std::function<void()> onEquipped, QWidget *parent)
+        : QFrame(parent), m_isWeapon(isWeapon), m_artSlot(artSlot)
+        , m_pieceId(pieceId), m_engine(engine), m_onEquipped(onEquipped)
+    {
+        setAcceptDrops(true);
+        setFixedHeight(16);
+        setStyleSheet("EquipDropRow { background: transparent; border: 1px dashed transparent; border-radius: 2px; }");
+    }
+protected:
+    void dragEnterEvent(QDragEnterEvent *event) override {
+        if (!m_engine || !m_engine->findCharacterById(m_pieceId)) return;
+        auto *mime = DragDropMimeData::fromMimeData(event->mimeData());
+        if (!mime) return;
+        if (m_isWeapon && mime->sourceType() == QStringLiteral("backpack_weapon")) {
+            event->acceptProposedAction();
+            setStyleSheet("EquipDropRow { background: #2a3a2a; border: 1px dashed #5a5; border-radius: 2px; }");
+        } else if (!m_isWeapon && mime->sourceType() == QStringLiteral("backpack_artifact")) {
+            event->acceptProposedAction();
+            setStyleSheet("EquipDropRow { background: #2a3a2a; border: 1px dashed #5a5; border-radius: 2px; }");
+        }
+    }
+    void dragLeaveEvent(QDragLeaveEvent*) override {
+        setStyleSheet("EquipDropRow { background: transparent; border: 1px dashed transparent; border-radius: 2px; }");
+    }
+    void dropEvent(QDropEvent *event) override {
+        setStyleSheet("EquipDropRow { background: transparent; border: 1px dashed transparent; border-radius: 2px; }");
+        auto *mime = DragDropMimeData::fromMimeData(event->mimeData());
+        if (!mime || !m_engine) return;
+        auto *piece = m_engine->findCharacterById(m_pieceId);
+        if (!piece) return;
+        int idx = mime->backpackIndex();
+        if (idx < 0) return;
+        if (m_isWeapon && mime->sourceType() == QStringLiteral("backpack_weapon")) {
+            if (m_engine->equipWeapon(piece, idx)) {
+                event->acceptProposedAction();
+                if (m_onEquipped) {
+                    // Delay callback to avoid use-after-free (this may be deleted by callback)
+                    QTimer::singleShot(0, this, [cb = m_onEquipped]() { cb(); });
+                }
+            }
+        } else if (!m_isWeapon && mime->sourceType() == QStringLiteral("backpack_artifact")) {
+            if (m_engine->equipArtifact(piece, idx, m_artSlot)) {
+                event->acceptProposedAction();
+                if (m_onEquipped) {
+                    QTimer::singleShot(0, this, [cb = m_onEquipped]() { cb(); });
+                }
+            }
+        }
+    }
+private:
+    bool m_isWeapon;
+    ArtifactSlot m_artSlot;
+    int m_pieceId;
+    GameEngine *m_engine;
+    std::function<void()> m_onEquipped;
+};
+
+void InfoPanel::showCharacterInfo(CharacterBase *piece, bool previewOnly)
 {
     m_selectedPiece = piece;
     m_selectedPos = piece ? piece->gridPos() : GridPos{-1, -1};
@@ -245,37 +311,68 @@ void InfoPanel::showCharacterInfo(CharacterBase *piece)
     clearLayout(m_equipLayout);
     auto *p = piece;
 
-    // Weapon row
-    auto *weaponRow = new QHBoxLayout;
-    auto *wpnLabel = new QLabel(p->hasWeapon() ? p->weapon().name() : QStringLiteral("武器: 无"));
-    wpnLabel->setStyleSheet("color: #ccc; font-size: 11px;");
-    weaponRow->addWidget(wpnLabel, 1);
-    if (p->hasWeapon()) {
-        auto *unequipBtn = new QPushButton(QStringLiteral("卸下"));
-        unequipBtn->setFixedSize(36, 18);
-        unequipBtn->setStyleSheet("QPushButton{background:#5a2020;color:#faa;border:1px solid #844;border-radius:2px;font-size:9px;}QPushButton:hover{background:#7a3030;}");
-        connect(unequipBtn, &QPushButton::clicked, this, [this, p]() { emit unequipWeaponRequested(p); });
-        weaponRow->addWidget(unequipBtn);
-    }
-    m_equipLayout->addLayout(weaponRow);
+    if (previewOnly) {
+        // Preview mode: show equipment info only, no interactive buttons
+        auto *wpnLabel = new QLabel(QStringLiteral("武器: %1")
+            .arg(p->hasWeapon() ? p->weapon().name() : QStringLiteral("无")));
+        wpnLabel->setStyleSheet(QStringLiteral("color: %1; font-size: 11px;")
+                               .arg(p->hasWeapon() ? QStringLiteral("#ccc") : QStringLiteral("#888")));
+        m_equipLayout->addWidget(wpnLabel);
 
-    // Artifact slot rows
-    for (int i = 0; i < MAX_ARTIFACT_SLOTS; ++i) {
-        auto slot = static_cast<ArtifactSlot>(i);
-        auto *artRow = new QHBoxLayout;
-        QString artText = artifactSlotName(slot) + QStringLiteral(": ");
-        artText += p->hasArtifact(slot) ? p->artifact(slot).name() : QStringLiteral("空");
-        auto *artLabel = new QLabel(artText);
-        artLabel->setStyleSheet("color: #bbb; font-size: 10px;");
-        artRow->addWidget(artLabel, 1);
-        if (p->hasArtifact(slot)) {
+        for (int i = 0; i < MAX_ARTIFACT_SLOTS; ++i) {
+            auto slot = static_cast<ArtifactSlot>(i);
+            auto *artLabel = new QLabel(artifactSlotName(slot) + QStringLiteral(": ") +
+                (p->hasArtifact(slot) ? p->artifact(slot).name() : QStringLiteral("空")));
+            artLabel->setStyleSheet("color: #bbb; font-size: 10px;");
+            m_equipLayout->addWidget(artLabel);
+        }
+    } else {
+        // Normal mode: drop zones + unequip buttons
+        // Weapon row with drop zone
+        auto *weaponRow = new QHBoxLayout;
+        auto *wpnLabel = new QLabel(p->hasWeapon() ? p->weapon().name() : QStringLiteral("武器: 无"));
+        wpnLabel->setStyleSheet(QStringLiteral("color: %1; font-size: 11px;")
+                               .arg(p->hasWeapon() ? QStringLiteral("#ccc") : QStringLiteral("#888")));
+        weaponRow->addWidget(wpnLabel, 1);
+        if (p->hasWeapon()) {
             auto *unequipBtn = new QPushButton(QStringLiteral("卸下"));
             unequipBtn->setFixedSize(36, 18);
             unequipBtn->setStyleSheet("QPushButton{background:#5a2020;color:#faa;border:1px solid #844;border-radius:2px;font-size:9px;}QPushButton:hover{background:#7a3030;}");
-            connect(unequipBtn, &QPushButton::clicked, this, [this, p, slot]() { emit unequipArtifactRequested(p, slot); });
-            artRow->addWidget(unequipBtn);
+            connect(unequipBtn, &QPushButton::clicked, this, [this, p]() { emit unequipWeaponRequested(p); });
+            weaponRow->addWidget(unequipBtn);
         }
-        m_equipLayout->addLayout(artRow);
+        m_equipLayout->addLayout(weaponRow);
+        // Weapon drop zone hint
+        auto onEquipped = [this, p]() {
+            showCharacterInfo(p);
+            emit equipCompleted();
+        };
+        auto *wpnDrop = new EquipDropRow(true, ArtifactSlot::NONE, p->persistentId(), m_engine, onEquipped, m_equipContainer);
+        wpnDrop->setToolTip(QStringLiteral("从背包拖拽武器到此处装备"));
+        m_equipLayout->addWidget(wpnDrop);
+
+        // Artifact slot rows with drop zones
+        for (int i = 0; i < MAX_ARTIFACT_SLOTS; ++i) {
+            auto slot = static_cast<ArtifactSlot>(i);
+            auto *artRow = new QHBoxLayout;
+            QString artText = artifactSlotName(slot) + QStringLiteral(": ");
+            artText += p->hasArtifact(slot) ? p->artifact(slot).name() : QStringLiteral("空");
+            auto *artLabel = new QLabel(artText);
+            artLabel->setStyleSheet("color: #bbb; font-size: 10px;");
+            artRow->addWidget(artLabel, 1);
+            if (p->hasArtifact(slot)) {
+                auto *unequipBtn = new QPushButton(QStringLiteral("卸下"));
+                unequipBtn->setFixedSize(36, 18);
+                unequipBtn->setStyleSheet("QPushButton{background:#5a2020;color:#faa;border:1px solid #844;border-radius:2px;font-size:9px;}QPushButton:hover{background:#7a3030;}");
+                connect(unequipBtn, &QPushButton::clicked, this, [this, p, slot]() { emit unequipArtifactRequested(p, slot); });
+                artRow->addWidget(unequipBtn);
+            }
+            m_equipLayout->addLayout(artRow);
+            // Artifact drop zone
+            auto *artDrop = new EquipDropRow(false, slot, p->persistentId(), m_engine, onEquipped, m_equipContainer);
+            artDrop->setToolTip(QStringLiteral("从背包拖拽圣遗物到此处装备"));
+            m_equipLayout->addWidget(artDrop);
+        }
     }
 
     m_charConstellationLabel->setText(
@@ -287,18 +384,23 @@ void InfoPanel::showCharacterInfo(CharacterBase *piece)
         .arg(piece->constellationBaseDmgBonus() * 100, 0, 'f', 0)
     );
 
-    // Show return button only if piece is on player deploy zone
-    bool onBoard = piece->gridPos().isValid() && m_engine->board()->isPlayerDeployZone(piece->gridPos());
+    // Show return button only if piece is on player deploy zone (and not preview)
+    bool onBoard = !previewOnly && piece->gridPos().isValid()
+                   && m_engine->board()->isPlayerDeployZone(piece->gridPos());
     m_returnBtn->setVisible(onBoard);
 
-    // Show sell button only if piece is in storage
+    // Show sell button only if piece is in storage (and not preview)
     m_sellBtn->setVisible(false);
-    auto &storage = m_engine->storage();
-    for (int i = 0; i < storage.size(); ++i) {
-        if (storage[i] == piece) {
-            m_sellBtn->setVisible(true);
-            m_selectedStorageIndex = i;
-            break;
+    if (!previewOnly) {
+        auto &storage = m_engine->storage();
+        for (int i = 0; i < storage.size(); ++i) {
+            if (storage[i] == piece) {
+                m_sellBtn->setVisible(true);
+                m_selectedStorageIndex = i;
+                int price = 90 + piece->constellation() * 15;
+                m_sellBtn->setText(QStringLiteral("出售 (%1原石)").arg(price));
+                break;
+            }
         }
     }
 }

@@ -13,7 +13,7 @@ void Board::clear()
     for (int r = 0; r < BOARD_ROWS; ++r)
         for (int c = 0; c < BOARD_COLS; ++c)
             m_grid[r][c] = nullptr;
-    emit boardChanged();
+    if (!m_signalBlocked) emit boardChanged();
 }
 
 void Board::resetBoard()
@@ -37,7 +37,7 @@ void Board::placePiece(int row, int col, CharacterBase *piece)
     if (row < 0 || row >= BOARD_ROWS || col < 0 || col >= BOARD_COLS) return;
     m_grid[row][col] = piece;
     if (piece) piece->setGridPos({row, col});
-    emit boardChanged();
+    if (!m_signalBlocked) emit boardChanged();
 }
 
 void Board::placePiece(GridPos pos, CharacterBase *piece)
@@ -51,7 +51,7 @@ CharacterBase* Board::removePiece(int row, int col)
     auto *p = m_grid[row][col];
     m_grid[row][col] = nullptr;
     if (p) p->setGridPos({-1, -1});
-    emit boardChanged();
+    if (!m_signalBlocked) emit boardChanged();
     return p;
 }
 
@@ -111,7 +111,7 @@ void Board::clearSide(TeamSide side)
         for (int c = 0; c < BOARD_COLS; ++c)
             if (m_grid[r][c] && m_grid[r][c]->side() == side)
                 m_grid[r][c] = nullptr;
-    emit boardChanged();
+    if (!m_signalBlocked) emit boardChanged();
 }
 
 void Board::movePiece(GridPos from, GridPos to)

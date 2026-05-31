@@ -134,8 +134,8 @@ constexpr int CHARACTER_COST = 160;
 constexpr int ARTIFACT_COST = 100;
 constexpr int WEAPON_BASE_COST = 50; // +50 per star level above 2
 
-constexpr int INITIAL_PRIMOGEMS = 320;
-constexpr int INITIAL_MORA = 1000;
+constexpr int INITIAL_PRIMOGEMS = 6400;//***{6400 for demo;in fact,it should be 320}***
+constexpr int INITIAL_MORA = 10000;//***{10000 for demo;in fact,it should be 1000}***
 constexpr int WIN_PRIMOGEMS = 320;
 constexpr int WIN_MORA = 1000;
 constexpr int LOSE_PRIMOGEMS = 160;
@@ -279,6 +279,7 @@ struct BattleAction {
     bool moved = false;
     ElementType attackElement = ElementType::None;
     ElementType reactionElement = ElementType::None;
+    TeamSide attackerSide = TeamSide::Player;
 };
 
 // --- Color helpers ---

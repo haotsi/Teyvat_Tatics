@@ -17,7 +17,7 @@ class InfoPanel : public QWidget {
 public:
     explicit InfoPanel(GameEngine *engine, QWidget *parent = nullptr);
 
-    void showCharacterInfo(CharacterBase *piece);
+    void showCharacterInfo(CharacterBase *piece, bool previewOnly = false);
     void showWeaponInfo(const Weapon &weapon, int backpackIndex = -1);
     void showArtifactInfo(const Artifact &artifact, int backpackIndex = -1);
     void clearInfo();
@@ -31,6 +31,7 @@ signals:
     void upgradePopClicked();
     void unequipWeaponRequested(CharacterBase *piece);
     void unequipArtifactRequested(CharacterBase *piece, ArtifactSlot slot);
+    void equipCompleted();
 
 private:
     GameEngine *m_engine;

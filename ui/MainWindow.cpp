@@ -106,6 +106,15 @@ void MainWindow::setupUI()
     m_storageBar = new StorageBar(m_engine);
     centerLayout->addWidget(m_storageBar);
 
+    // Embedded panels (toggle visibility)
+    m_backpackWidget = new BackpackWidget(m_engine);
+    m_backpackWidget->hide();
+    centerLayout->addWidget(m_backpackWidget);
+
+    m_mergePanel = new MergePanel(m_engine);
+    m_mergePanel->hide();
+    centerLayout->addWidget(m_mergePanel);
+
     // Buttons row: backpack + merge
     auto *btnRow = new QHBoxLayout;
     btnRow->setSpacing(8);
@@ -129,12 +138,6 @@ void MainWindow::setupUI()
     centerLayout->addLayout(btnRow);
 
     mainLayout->addLayout(centerLayout);
-
-    // Create popup widgets
-    m_backpackWidget = new BackpackWidget(m_engine, this);
-    m_backpackWidget->hide();
-    m_mergePanel = new MergePanel(m_engine, this);
-    m_mergePanel->hide();
 
     // Style the central area
     centralWidget->setStyleSheet("background: #0f0f23;");
@@ -208,6 +211,10 @@ void MainWindow::setupConnections()
         m_infoPanel->showCharacterInfo(piece);
         m_backpackWidget->refresh();
     });
+    // Equip completed (from drop zones)
+    connect(m_infoPanel, &InfoPanel::equipCompleted, this, [this]() {
+        m_backpackWidget->refresh();
+    });
 
     // Difficulty selector
     connect(m_difficultyCombo, QOverload<int>::of(&QComboBox::currentIndexChanged),
@@ -222,7 +229,7 @@ void MainWindow::setupConnections()
         m_engine->ai()->setDifficulty(diff);
     });
 
-    // Shop item click -> Info panel
+    // Shop item click -> Info panel (preview mode for characters)
     connect(m_shopWidget, &ShopWidget::itemClicked, this, [this](int index) {
         auto *shop = m_engine->shop();
         auto *item = shop->itemAt(index);
@@ -230,7 +237,7 @@ void MainWindow::setupConnections()
         switch (item->type) {
             case ShopItem::Item_Char:
                 if (item->character)
-                    m_infoPanel->showCharacterInfo(item->character);
+                    m_infoPanel->showCharacterInfo(item->character, true);
                 break;
             case ShopItem::Item_Weapon:
                 m_infoPanel->showWeaponInfo(item->weapon);
@@ -261,28 +268,37 @@ void MainWindow::setupConnections()
         m_storageBar->refresh();
     });
 
-    // Backpack button -> toggle popup
+    // Backpack button -> toggle visibility
     connect(m_backpackBtn, &QPushButton::clicked, this, [this]() {
-        if (m_backpackWidget->isVisible())
-            m_backpackWidget->hide();
-        else {
-            m_backpackWidget->refresh();
-            QPoint pos = m_backpackBtn->mapToGlobal(QPoint(0, m_backpackBtn->height()));
-            m_backpackWidget->move(pos);
-            m_backpackWidget->show();
-        }
+        m_backpackWidget->setVisible(!m_backpackWidget->isVisible());
     });
 
-    // Merge button -> toggle popup
+    // Merge button -> toggle visibility
     connect(m_mergeBtn, &QPushButton::clicked, this, [this]() {
-        if (m_mergePanel->isVisible())
-            m_mergePanel->hide();
-        else {
-            m_mergePanel->refresh();
-            QPoint pos = m_mergeBtn->mapToGlobal(QPoint(0, m_mergeBtn->height()));
-            m_mergePanel->move(pos);
-            m_mergePanel->show();
-        }
+        m_mergePanel->setVisible(!m_mergePanel->isVisible());
+    });
+
+    // Backpack close button
+    connect(m_backpackWidget, &BackpackWidget::closeRequested, this, [this]() {
+        m_backpackWidget->hide();
+    });
+
+    // Merge panel close button
+    connect(m_mergePanel, &MergePanel::closeRequested, this, [this]() {
+        m_mergePanel->hide();
+    });
+
+    // Merge completed -> refresh board & storage
+    connect(m_mergePanel, &MergePanel::mergeCompleted, this, [this](CharacterBase*) {
+        m_boardWidget->refreshBoard();
+        m_storageBar->refresh();
+        m_infoPanel->clearInfo();
+    });
+
+    // Backpack auto-refresh via signal (only when visible)
+    connect(m_engine, &GameEngine::backpackChanged, this, [this]() {
+        if (m_backpackWidget->isVisible())
+            m_backpackWidget->refresh();
     });
 
     // Backpack clicks -> InfoPanel
