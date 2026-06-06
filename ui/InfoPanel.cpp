@@ -211,15 +211,27 @@ public:
     }
 protected:
     void dragEnterEvent(QDragEnterEvent *event) override {
-        if (!m_engine || !m_engine->findCharacterById(m_pieceId)) return;
+        if (!m_engine) return;
+        auto *piece = m_engine->findCharacterById(m_pieceId);
+        if (!piece) return;
         auto *mime = DragDropMimeData::fromMimeData(event->mimeData());
         if (!mime) return;
+        int idx = mime->backpackIndex();
+        if (idx < 0) return;
         if (m_isWeapon && mime->sourceType() == QStringLiteral("backpack_weapon")) {
-            event->acceptProposedAction();
-            setStyleSheet("EquipDropRow { background: #2a3a2a; border: 1px dashed #5a5; border-radius: 2px; }");
+            // Only accept if weapon type matches character
+            auto &backpack = m_engine->weaponBackpack();
+            if (idx < backpack.size() && backpack[idx].type() == piece->weaponType()) {
+                event->acceptProposedAction();
+                setStyleSheet("EquipDropRow { background: #2a3a2a; border: 1px dashed #5a5; border-radius: 2px; }");
+            }
         } else if (!m_isWeapon && mime->sourceType() == QStringLiteral("backpack_artifact")) {
-            event->acceptProposedAction();
-            setStyleSheet("EquipDropRow { background: #2a3a2a; border: 1px dashed #5a5; border-radius: 2px; }");
+            // Only accept if artifact slot matches target slot
+            auto &backpack = m_engine->artifactBackpack();
+            if (idx < backpack.size() && backpack[idx].slot() == m_artSlot) {
+                event->acceptProposedAction();
+                setStyleSheet("EquipDropRow { background: #2a3a2a; border: 1px dashed #5a5; border-radius: 2px; }");
+            }
         }
     }
     void dragLeaveEvent(QDragLeaveEvent*) override {

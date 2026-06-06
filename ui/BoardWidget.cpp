@@ -119,7 +119,7 @@ void BoardWidget::placePieceItem(CharacterBase *piece)
     if (!piece) return;
 
     GridPos pos = piece->gridPos();
-    auto *item = new PieceItem(piece, m_cellSize);
+    auto *item = new PieceItem(piece, m_engine, m_cellSize);
     QPointF scenePos = scenePosFromGrid(pos);
     item->setPos(scenePos);
     m_scene->addItem(item);
@@ -162,6 +162,10 @@ QRectF BoardWidget::cellRect(GridPos pos) const
 
 void BoardWidget::dragEnterEvent(QDragEnterEvent *event)
 {
+    if (m_engine->phase() != GamePhase::Preparation) {
+        event->ignore();
+        return;
+    }
     if (DragDropMimeData::isPieceDrag(event->mimeData())) {
         event->acceptProposedAction();
     }
@@ -169,6 +173,10 @@ void BoardWidget::dragEnterEvent(QDragEnterEvent *event)
 
 void BoardWidget::dragMoveEvent(QDragMoveEvent *event)
 {
+    if (m_engine->phase() != GamePhase::Preparation) {
+        event->ignore();
+        return;
+    }
     if (DragDropMimeData::isPieceDrag(event->mimeData())) {
         event->acceptProposedAction();
     }
@@ -176,6 +184,7 @@ void BoardWidget::dragMoveEvent(QDragMoveEvent *event)
 
 void BoardWidget::dropEvent(QDropEvent *event)
 {
+    if (m_engine->phase() != GamePhase::Preparation) return;
     auto *mimeData = DragDropMimeData::fromMimeData(event->mimeData());
     if (!mimeData) return;
 

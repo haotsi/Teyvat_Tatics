@@ -60,7 +60,10 @@ CharacterBase* Board::removePiece(GridPos pos)
     return removePiece(pos.row, pos.col);
 }
 
-bool Board::isOccupied(int row, int col) const { return pieceAt(row, col) != nullptr; }
+bool Board::isOccupied(int row, int col) const {
+    auto *p = pieceAt(row, col);
+    return p != nullptr && p->isAlive(); // Dead pieces don't block cells
+}
 bool Board::isOccupied(GridPos pos) const { return isOccupied(pos.row, pos.col); }
 bool Board::isEmpty(int row, int col) const { return !isOccupied(row, col); }
 bool Board::isEmpty(GridPos pos) const { return isEmpty(pos.row, pos.col); }
@@ -80,7 +83,7 @@ QVector<CharacterBase*> Board::playerPieces() const
     QVector<CharacterBase*> result;
     for (int r = 0; r < BOARD_ROWS; ++r)
         for (int c = 0; c < BOARD_COLS; ++c)
-            if (m_grid[r][c] && m_grid[r][c]->side() == TeamSide::Player)
+            if (m_grid[r][c] && m_grid[r][c]->side() == TeamSide::Player && m_grid[r][c]->isAlive())
                 result.append(m_grid[r][c]);
     return result;
 }
@@ -90,7 +93,7 @@ QVector<CharacterBase*> Board::enemyPieces() const
     QVector<CharacterBase*> result;
     for (int r = 0; r < BOARD_ROWS; ++r)
         for (int c = 0; c < BOARD_COLS; ++c)
-            if (m_grid[r][c] && m_grid[r][c]->side() == TeamSide::Enemy)
+            if (m_grid[r][c] && m_grid[r][c]->side() == TeamSide::Enemy && m_grid[r][c]->isAlive())
                 result.append(m_grid[r][c]);
     return result;
 }

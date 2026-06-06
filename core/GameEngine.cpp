@@ -353,7 +353,25 @@ void GameEngine::processCharacterAction(CharacterBase *piece)
     CharacterBase *target = m_ai->chooseTarget(m_board, piece);
     if (target && target->isAlive()) {
         bool useBurst = piece->energyFull();
-        processAttack(piece, target, useBurst);
+        if (piece->weaponType() == WeaponType::Polearm) {
+            // Polearm pierce: hit all enemies along attack direction
+            GridPos atkPos = piece->gridPos();
+            GridPos tgtPos = target->gridPos();
+            int dr = 0, dc = 0;
+            if (tgtPos.row > atkPos.row) dr = 1;
+            else if (tgtPos.row < atkPos.row) dr = -1;
+            if (tgtPos.col > atkPos.col) dc = 1;
+            else if (tgtPos.col < atkPos.col) dc = -1;
+            for (int dist = 1; dist <= 2; ++dist) {
+                GridPos pos{atkPos.row + dr * dist, atkPos.col + dc * dist};
+                if (!pos.isValid()) break;
+                auto *enemy = m_board->pieceAt(pos);
+                if (enemy && enemy->side() != piece->side() && enemy->isAlive())
+                    processAttack(piece, enemy, useBurst);
+            }
+        } else {
+            processAttack(piece, target, useBurst);
+        }
         if (useBurst) {
             piece->setCurrentEnergy(0);
             action.skillName = piece->burstInfo().name;
@@ -386,15 +404,14 @@ void GameEngine::processAttack(CharacterBase *attacker, CharacterBase *defender,
     ReactionResult reaction = m_elementSystem->tryReaction(attacker, defender, atkElem, isBurst);
 
     double totalDmg = 0;
+    bool crit = QRandomGenerator::global()->bounded(100) / 100.0 < attacker->critRate();
 
     if (reaction.type != ReactionType::None && reaction.isAmplifying) {
         // Amplifying reaction
         totalDmg = attacker->calcAmplifyingDamage(skillMult, reaction.reactionMultiplier,
-                                                   reaction.masteryZone,
-                                                   QRandomGenerator::global()->bounded(100) / 100.0 < attacker->critRate());
+                                                   reaction.masteryZone, crit);
     } else {
         // Normal damage
-        bool crit = QRandomGenerator::global()->bounded(100) / 100.0 < attacker->critRate();
         totalDmg = attacker->calcDamage(skillMult, crit);
     }
 
@@ -417,7 +434,7 @@ void GameEngine::processAttack(CharacterBase *attacker, CharacterBase *defender,
     logEntry.damage = totalDmg;
     logEntry.reaction = reaction.type;
     logEntry.skillName = isBurst ? attacker->burstInfo().name : attacker->normalAttackInfo().name;
-    logEntry.crit = QRandomGenerator::global()->bounded(100) / 100.0 < attacker->critRate();
+    logEntry.crit = crit;
     logEntry.attackElement = atkElem;
     logEntry.reactionElement = reactionElementColor(reaction.type);
     logEntry.attackerSide = attacker->side();
@@ -662,18 +679,28 @@ bool GameEngine::buyShopItem(int index)
     switch (itemType) {
         case ShopItem::Item_Char:
             if (purchasedChar) {
-                if (!addToStorage(purchasedChar.release()))
+                if (!addToStorage(purchasedChar.release())) {
                     m_primogems += costPrimo; // refund if storage full
+                    emit messageLogged(QStringLiteral("储存栏已满，无法购买角色！"));
+                }
             }
             break;
         case ShopItem::Item_Weapon:
+            if (m_weaponBackpack.size() >= MAX_WEAPON_BACKPACK) {
+                m_mora += costMora; // refund
+                emit messageLogged(QStringLiteral("武器背包已满！"));
+                return false;
+            }
             m_weaponBackpack.append(purchasedWeapon);
-            enforceBackpackCapacity();
             emit backpackChanged();
             break;
         case ShopItem::Item_Artifact:
+            if (m_artifactBackpack.size() >= MAX_ARTIFACT_BACKPACK) {
+                m_mora += costMora; // refund
+                emit messageLogged(QStringLiteral("圣遗物背包已满！"));
+                return false;
+            }
             m_artifactBackpack.append(purchasedArtifact);
-            enforceBackpackCapacity();
             emit backpackChanged();
             break;
     }
@@ -800,12 +827,17 @@ bool GameEngine::moveDeployedPiece(GridPos from, GridPos to)
 bool GameEngine::equipWeapon(CharacterBase *piece, int backpackIndex)
 {
     if (!piece || backpackIndex < 0 || backpackIndex >= m_weaponBackpack.size()) return false;
+    // Check weapon type matches character
+    if (m_weaponBackpack[backpackIndex].type() != piece->weaponType()) return false;
+    // Check capacity if swapping (old weapon goes to backpack)
+    if (piece->hasWeapon() && m_weaponBackpack.size() >= MAX_WEAPON_BACKPACK) {
+        emit messageLogged(QStringLiteral("武器背包已满，无法卸下旧武器！"));
+        return false;
+    }
     Weapon w = m_weaponBackpack.takeAt(backpackIndex);
-    // If piece already has weapon, put old one in backpack
     if (piece->hasWeapon())
         m_weaponBackpack.append(piece->weapon());
     piece->setWeapon(w);
-    enforceBackpackCapacity();
     emit backpackChanged();
     return true;
 }
@@ -813,11 +845,17 @@ bool GameEngine::equipWeapon(CharacterBase *piece, int backpackIndex)
 bool GameEngine::equipArtifact(CharacterBase *piece, int backpackIndex, ArtifactSlot slot)
 {
     if (!piece || backpackIndex < 0 || backpackIndex >= m_artifactBackpack.size()) return false;
+    // Check artifact slot matches target
+    if (m_artifactBackpack[backpackIndex].slot() != slot) return false;
+    // Check capacity if swapping (old artifact goes to backpack)
+    if (piece->hasArtifact(slot) && m_artifactBackpack.size() >= MAX_ARTIFACT_BACKPACK) {
+        emit messageLogged(QStringLiteral("圣遗物背包已满，无法卸下旧圣遗物！"));
+        return false;
+    }
     Artifact a = m_artifactBackpack.takeAt(backpackIndex);
     if (piece->hasArtifact(slot))
         m_artifactBackpack.append(piece->artifact(slot));
     piece->setArtifact(slot, a);
-    enforceBackpackCapacity();
     emit backpackChanged();
     return true;
 }
@@ -825,9 +863,12 @@ bool GameEngine::equipArtifact(CharacterBase *piece, int backpackIndex, Artifact
 bool GameEngine::unequipWeapon(CharacterBase *piece)
 {
     if (!piece || !piece->hasWeapon()) return false;
+    if (m_weaponBackpack.size() >= MAX_WEAPON_BACKPACK) {
+        emit messageLogged(QStringLiteral("武器背包已满，无法卸下！"));
+        return false;
+    }
     m_weaponBackpack.append(piece->weapon());
     piece->clearWeapon();
-    enforceBackpackCapacity();
     emit backpackChanged();
     return true;
 }
@@ -835,9 +876,12 @@ bool GameEngine::unequipWeapon(CharacterBase *piece)
 bool GameEngine::unequipArtifact(CharacterBase *piece, ArtifactSlot slot)
 {
     if (!piece || !piece->hasArtifact(slot)) return false;
+    if (m_artifactBackpack.size() >= MAX_ARTIFACT_BACKPACK) {
+        emit messageLogged(QStringLiteral("圣遗物背包已满，无法卸下！"));
+        return false;
+    }
     m_artifactBackpack.append(piece->artifact(slot));
     piece->clearArtifact(slot);
-    enforceBackpackCapacity();
     emit backpackChanged();
     return true;
 }
@@ -979,47 +1023,6 @@ void GameEngine::unregisterCharacter(CharacterBase *p)
 CharacterBase* GameEngine::findCharacterById(int persistentId) const
 {
     return m_characterRegistry.value(persistentId, nullptr);
-}
-
-void GameEngine::enforceBackpackCapacity()
-{
-    // Enforce weapon backpack capacity
-    while (m_weaponBackpack.size() > MAX_WEAPON_BACKPACK) {
-        // Find item with lowest sellPrice; if tie, earliest (lowest index)
-        int worstIdx = 0;
-        int worstPrice = m_weaponBackpack[0].sellPrice();
-        for (int i = 1; i < m_weaponBackpack.size(); ++i) {
-            int p = m_weaponBackpack[i].sellPrice();
-            if (p < worstPrice) {
-                worstPrice = p;
-                worstIdx = i;
-            }
-        }
-        m_mora += m_weaponBackpack[worstIdx].sellPrice();
-        emit messageLogged(QStringLiteral("已自动出售 %1，获得 %2 摩拉")
-                          .arg(m_weaponBackpack[worstIdx].name())
-                          .arg(m_weaponBackpack[worstIdx].sellPrice()));
-        m_weaponBackpack.removeAt(worstIdx);
-    }
-
-    // Enforce artifact backpack capacity
-    while (m_artifactBackpack.size() > MAX_ARTIFACT_BACKPACK) {
-        int worstIdx = 0;
-        int worstPrice = m_artifactBackpack[0].sellPrice();
-        for (int i = 1; i < m_artifactBackpack.size(); ++i) {
-            int p = m_artifactBackpack[i].sellPrice();
-            if (p < worstPrice) {
-                worstPrice = p;
-                worstIdx = i;
-            }
-        }
-        m_mora += m_artifactBackpack[worstIdx].sellPrice();
-        emit messageLogged(QStringLiteral("已自动出售 %1，获得 %2 摩拉")
-                          .arg(m_artifactBackpack[worstIdx].name())
-                          .arg(m_artifactBackpack[worstIdx].sellPrice()));
-        m_artifactBackpack.removeAt(worstIdx);
-    }
-    emit resourcesChanged();
 }
 
 CharacterBase* GameEngine::createMergedCharacter(CharacterBase *a, CharacterBase *b)

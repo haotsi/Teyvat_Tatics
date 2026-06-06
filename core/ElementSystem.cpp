@@ -27,29 +27,29 @@ double ElementSystem::burningDamage(double em)
 ReactionType ElementSystem::checkReactionBetween(ElementType a, ElementType b)
 {
     // Ensure consistent ordering: lower enum value first
+    // Enum order: Hydro=0, Pyro=1, Electro=2, Cryo=3, Dendro=4, Anemo=5, Geo=6, None=7
     if (static_cast<int>(a) > static_cast<int>(b))
         std::swap(a, b);
 
-    // Hydro + Pyro = Vaporize
+    // All conditions use SORTED order (a = lower enum value, b = higher)
+    // Vaporize: Hydro(0) + Pyro(1)
     if (a == ElementType::Hydro && b == ElementType::Pyro) return ReactionType::Vaporize;
-    // Pyro + Cryo = Melt (a=Pyro, b=Cryo after sort or vice versa)
-    if (a == ElementType::Cryo && b == ElementType::Pyro) return ReactionType::Melt;
-    // Pyro + Electro = Overload
-    if (a == ElementType::Electro && b == ElementType::Pyro) return ReactionType::Overload;
-    // Hydro + Electro = ElectroCharged
-    if (a == ElementType::Electro && b == ElementType::Hydro) return ReactionType::ElectroCharged;
-    // Cryo + Electro = Superconduct
-    if (a == ElementType::Cryo && b == ElementType::Electro) return ReactionType::Superconduct;
-    // Hydro + Cryo = Frozen
-    if (a == ElementType::Cryo && b == ElementType::Hydro) return ReactionType::Frozen;
-    // Hydro + Dendro = Bloom
-    if (a == ElementType::Dendro && b == ElementType::Hydro) return ReactionType::Bloom;
-    // Pyro + Dendro = Burning
-    if (a == ElementType::Dendro && b == ElementType::Pyro) return ReactionType::Burning;
-    // Electro + Dendro = Quicken
-    if (a == ElementType::Dendro && b == ElementType::Electro) return ReactionType::Quicken;
-    // Anemo + any swirlable = Swirl (handled separately)
-    // Geo + any crystallizable = Crystallize (handled separately)
+    // Melt: Pyro(1) + Cryo(3)
+    if (a == ElementType::Pyro && b == ElementType::Cryo) return ReactionType::Melt;
+    // Overload: Pyro(1) + Electro(2)
+    if (a == ElementType::Pyro && b == ElementType::Electro) return ReactionType::Overload;
+    // ElectroCharged: Hydro(0) + Electro(2)
+    if (a == ElementType::Hydro && b == ElementType::Electro) return ReactionType::ElectroCharged;
+    // Superconduct: Electro(2) + Cryo(3)
+    if (a == ElementType::Electro && b == ElementType::Cryo) return ReactionType::Superconduct;
+    // Frozen: Hydro(0) + Cryo(3)
+    if (a == ElementType::Hydro && b == ElementType::Cryo) return ReactionType::Frozen;
+    // Bloom: Hydro(0) + Dendro(4)
+    if (a == ElementType::Hydro && b == ElementType::Dendro) return ReactionType::Bloom;
+    // Burning: Pyro(1) + Dendro(4)
+    if (a == ElementType::Pyro && b == ElementType::Dendro) return ReactionType::Burning;
+    // Quicken: Electro(2) + Dendro(4)
+    if (a == ElementType::Electro && b == ElementType::Dendro) return ReactionType::Quicken;
 
     return ReactionType::None;
 }
@@ -60,44 +60,47 @@ ReactionResult ElementSystem::tryReaction(CharacterBase *attacker, CharacterBase
     ReactionResult result;
     if (attackElement == ElementType::None) return result;
 
-    // First, apply the new aura
-    // Anemo doesn't apply aura unless swirling (handled later)
-    if (attackElement != ElementType::Anemo)
+    // Apply attack element as aura (Anemo and Geo don't apply auras)
+    if (attackElement != ElementType::Anemo && attackElement != ElementType::Geo)
         defender->applyAura(attackElement, 1);
 
     auto &auras = defender->auras();
-    if (auras.size() < 2) {
-        // Check for Anemo swirl with existing aura
-        if (attackElement == ElementType::Anemo && !auras.isEmpty()) {
-            ElementType existing = auras.last().element;
-            if (existing == ElementType::Hydro || existing == ElementType::Pyro ||
-                existing == ElementType::Electro || existing == ElementType::Cryo) {
-                result.type = ReactionType::Swirl;
-                result.damage = REACTION_CONSTANT * SWIRL_MULT *
-                                (1.0 + (6.0 * attacker->eleMastery()) / (attacker->eleMastery() + 1400.0));
-                result.consumesAuras = false;
-                result.spreadElement = existing;
-                result.splashDamage = 1;
-                result.splashMultiplier = SWIRL_SPREAD_MULT;
-                result.description = reactionName(ReactionType::Swirl);
-                return result;
-            }
+
+    // Check for Anemo swirl with existing aura (before any pair-check block)
+    if (attackElement == ElementType::Anemo && !auras.isEmpty()) {
+        ElementType existing = auras.last().element;
+        if (existing == ElementType::Hydro || existing == ElementType::Pyro ||
+            existing == ElementType::Electro || existing == ElementType::Cryo) {
+            result.type = ReactionType::Swirl;
+            result.damage = REACTION_CONSTANT * SWIRL_MULT *
+                            (1.0 + (6.0 * attacker->eleMastery()) / (attacker->eleMastery() + 1400.0));
+            result.consumesAuras = false;
+            result.spreadElement = existing;
+            result.splashDamage = 1;
+            result.splashMultiplier = SWIRL_SPREAD_MULT;
+            result.description = reactionName(ReactionType::Swirl);
+            return result;
         }
-        // Check for Geo crystallize with existing aura
-        if (attackElement == ElementType::Geo && !auras.isEmpty()) {
-            ElementType existing = auras.last().element;
-            if (existing == ElementType::Hydro || existing == ElementType::Pyro ||
-                existing == ElementType::Electro || existing == ElementType::Cryo) {
-                result.type = ReactionType::Crystallize;
-                result.createsShield = true;
-                result.consumesAuras = true;
-                auras.clear(); // consume one unit
-                result.description = reactionName(ReactionType::Crystallize);
-                return result;
-            }
-        }
-        return result; // no reaction possible with < 2 auras
     }
+
+    // Check for Geo crystallize with existing aura (independent of aura count)
+    if (attackElement == ElementType::Geo && !auras.isEmpty()) {
+        ElementType existing = auras.last().element;
+        if (existing == ElementType::Hydro || existing == ElementType::Pyro ||
+            existing == ElementType::Electro || existing == ElementType::Cryo) {
+            result.type = ReactionType::Crystallize;
+            result.createsShield = true;
+            result.consumesAuras = true;
+            auras.clear();
+            result.description = reactionName(ReactionType::Crystallize);
+            return result;
+        }
+        return result; // Geo attack but no crystallizable aura
+    }
+
+    // Need at least 2 auras for pair reactions
+    if (auras.size() < 2)
+        return result;
 
     // Check all pairs of auras for reactions
     for (int i = 0; i < auras.size(); ++i) {
@@ -224,12 +227,11 @@ ReactionResult ElementSystem::processSeed(CharacterBase *trigger, ElementType tr
     double em = trigger ? trigger->eleMastery() : 0;
 
     if (triggerElement == ElementType::Pyro) {
-        // Burgeon
+        // Burgeon: damages adjacent enemies (1.5x) and adjacent allies (0.6x)
         result.type = ReactionType::Burgeon;
         result.damage = transformativeDamage(em, BURGEON_MULT);
-        result.splashDamage = 1; // adjacent enemies
-        result.splashMultiplier = BURGEON_MULT; // full damage to adjacent enemies
-        // self damage handled separately
+        result.splashDamage = 2; // adjacent all (enemies + allies)
+        result.splashMultiplier = BURGEON_MULT; // full for enemies
         result.description = reactionName(ReactionType::Burgeon);
     } else if (triggerElement == ElementType::Electro) {
         // Hyperbloom - two arrows

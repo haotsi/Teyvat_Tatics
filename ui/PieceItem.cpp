@@ -1,5 +1,6 @@
 #include "PieceItem.h"
 #include "core/CharacterBase.h"
+#include "core/GameEngine.h"
 #include "DragDropMimeData.h"
 #include <QGraphicsSceneMouseEvent>
 #include <QGraphicsScene>
@@ -10,8 +11,8 @@
 #include <QFontMetrics>
 #include <QtMath>
 
-PieceItem::PieceItem(CharacterBase *piece, int cellSize, QGraphicsItem *parent)
-    : QGraphicsObject(parent), m_piece(piece), m_cellSize(cellSize)
+PieceItem::PieceItem(CharacterBase *piece, GameEngine *engine, int cellSize, QGraphicsItem *parent)
+    : QGraphicsObject(parent), m_piece(piece), m_engine(engine), m_cellSize(cellSize)
 {
     setAcceptHoverEvents(true);
     setCursor(QCursor(Qt::OpenHandCursor));
@@ -51,7 +52,10 @@ void PieceItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidg
     double radius = r.width() / 2.0;
     QPointF center(0, 0);
 
-    if (m_dragging) {
+    // Dead pieces are semi-transparent ghosts
+    if (!m_piece->isAlive()) {
+        painter->setOpacity(0.3);
+    } else if (m_dragging) {
         painter->setOpacity(0.5);
     }
 
@@ -122,6 +126,10 @@ void PieceItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidg
 
 void PieceItem::mousePressEvent(QGraphicsSceneMouseEvent *event)
 {
+    // Dead pieces cannot be interacted with
+    if (!m_piece || !m_piece->isAlive()) return;
+    // No dragging during battle
+    if (m_engine && m_engine->phase() != GamePhase::Preparation) return;
     if (event->button() == Qt::LeftButton) {
         m_dragStartPos = event->pos();
         m_dragging = false;
@@ -132,7 +140,8 @@ void PieceItem::mousePressEvent(QGraphicsSceneMouseEvent *event)
 
 void PieceItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 {
-    if (!m_piece) return;
+    if (!m_piece || !m_piece->isAlive()) return;
+    if (m_engine && m_engine->phase() != GamePhase::Preparation) return;
     if (!m_dragging && (event->pos() - m_dragStartPos).manhattanLength() > 10) {
         m_dragging = true;
         emit dragStarted(this);

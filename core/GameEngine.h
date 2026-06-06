@@ -15,8 +15,8 @@
 #include <vector>
 
 // Backpack capacity limits
-constexpr int MAX_WEAPON_BACKPACK = 20;
-constexpr int MAX_ARTIFACT_BACKPACK = 20;
+constexpr int MAX_WEAPON_BACKPACK = 10;
+constexpr int MAX_ARTIFACT_BACKPACK = 10;
 
 class Board;
 class Team;
@@ -127,9 +127,6 @@ public:
     void registerCharacter(CharacterBase *p);
     void unregisterCharacter(CharacterBase *p);
     CharacterBase* findCharacterById(int persistentId) const;
-
-    // Backpack capacity enforcement
-    void enforceBackpackCapacity();
 
     // Interest
     void calculateInterest();

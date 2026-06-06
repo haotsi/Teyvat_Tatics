@@ -6,14 +6,16 @@
 #include "core/GameTypes.h"
 
 class CharacterBase;
+class GameEngine;
 
 class PieceItem : public QGraphicsObject {
     Q_OBJECT
 public:
-    explicit PieceItem(CharacterBase *piece, int cellSize, QGraphicsItem *parent = nullptr);
+    explicit PieceItem(CharacterBase *piece, GameEngine *engine, int cellSize, QGraphicsItem *parent = nullptr);
 
     CharacterBase* piece() const { return m_piece; }
     void setPiece(CharacterBase *piece) { m_piece = piece; update(); }
+    void setEngine(GameEngine *engine) { m_engine = engine; }
 
     QRectF boundingRect() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
@@ -40,6 +42,7 @@ protected:
 
 private:
     CharacterBase *m_piece;
+    GameEngine *m_engine = nullptr;
     int m_cellSize;
     bool m_highlighted = false;
     bool m_mergeHighlight = false;
